@@ -25,14 +25,14 @@ st.set_page_config(
 ENPHASE_LEFT = '482309046901'
 ENPHASE_RIGHT = '482309046789'
 
-# Colors
+# Colors - Green shades for Atmoce, Orange/Red shades for Enphase
 colors = {
-    'atmoce': '#e74c3c',
-    'enphase': '#f39c12',
-    'atmoce_pv1': '#9b59b6',
-    'atmoce_pv2': '#3498db',
-    'enphase_left': '#2ecc71',
-    'enphase_right': '#e67e22',
+    'atmoce': '#27ae60',           # Green (main)
+    'atmoce_pv1': '#2ecc71',       # Light green
+    'atmoce_pv2': '#1e8449',       # Dark green
+    'enphase': '#e67e22',          # Orange (main)
+    'enphase_left': '#e74c3c',     # Red
+    'enphase_right': '#f39c12',    # Yellow-orange
 }
 
 @st.cache_data
@@ -94,35 +94,32 @@ def load_enphase_data():
     return pd.DataFrame()
 
 @st.cache_data
-def interpolate_to_15min(df, value_columns, serial_col='Serial Number'):
-    """Interpolate to 15-minute intervals"""
-    interpolated_dfs = []
-    for serial in df[serial_col].unique():
-        unit_df = df[df[serial_col] == serial].copy().set_index('Time').sort_index()
-        start_time = unit_df.index.min().floor('15min')
-        end_time = unit_df.index.max().ceil('15min')
-        time_grid = pd.date_range(start=start_time, end=end_time, freq='15min')
-        unit_df_reindexed = unit_df.reindex(unit_df.index.union(time_grid))
-        for col in value_columns:
-            if col in unit_df_reindexed.columns:
-                unit_df_reindexed[col] = unit_df_reindexed[col].interpolate(method='linear')
-        unit_df_interpolated = unit_df_reindexed.loc[time_grid].copy()
-        unit_df_interpolated[serial_col] = serial
-        unit_df_interpolated = unit_df_interpolated.reset_index().rename(columns={'index': 'Time'})
-        unit_df_interpolated = unit_df_interpolated.dropna(subset=value_columns, how='all')
-        interpolated_dfs.append(unit_df_interpolated)
-    return pd.concat(interpolated_dfs, ignore_index=True)
+def round_to_15min(df, value_columns, serial_col='Serial Number'):
+    """Round Enphase timestamps to nearest 15-minute intervals (no interpolation)"""
+    df = df.copy()
+    # Round time to nearest 15 minutes
+    df['Time_Rounded'] = df['Time'].dt.round('15min')
+    
+    # Group by rounded time and serial, take mean of values
+    grouped = df.groupby(['Time_Rounded', serial_col]).agg({
+        **{col: 'mean' for col in value_columns if col in df.columns},
+        'Energy Produced (J)': 'sum'  # Sum energy, not average
+    }).reset_index()
+    grouped = grouped.rename(columns={'Time_Rounded': 'Time'})
+    
+    return grouped
 
 # Load data
 atmoce_df = load_atmoce_data()
 enphase_df_raw = load_enphase_data()
 
-value_cols = ['DC Voltage (V)', 'DC Current (A)', 'DC Power (W)', 'AC Power (W)', 'Grid Voltage (V)', 'Frequency (Hz)', 'Energy Produced (J)']
-enphase_df = interpolate_to_15min(enphase_df_raw, value_cols)
+value_cols = ['DC Voltage (V)', 'DC Current (A)', 'DC Power (W)', 'AC Power (W)', 'Grid Voltage (V)', 'Frequency (Hz)']
+enphase_df = round_to_15min(enphase_df_raw, value_cols)
 enphase_df['Date'] = enphase_df['Time'].dt.date
 
 common_dates = sorted(set(atmoce_df['Date'].unique()) & set(enphase_df['Date'].unique()))
 
+# Aggregate Enphase data by time (sum both inverters) - NO interpolation
 enphase_agg = enphase_df.groupby('Time').agg({
     'AC Power (W)': 'sum', 'DC Power (W)': 'sum', 'Grid Voltage (V)': 'mean',
     'Frequency (Hz)': 'mean', 'DC Voltage (V)': 'mean', 'DC Current (A)': 'sum'
@@ -224,9 +221,13 @@ st.caption("Atmoce: Generated Power | Enphase: (PCU AC Current × AC Voltage) Co
 
 power_fig = go.Figure()
 power_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['Generated Power (W)'],
-    mode='lines', name='Atmoce', line=dict(color=colors['atmoce'], width=2), fill='tozeroy', fillcolor='rgba(231,76,60,0.2)'))
+    mode='lines', name='Atmoce', line=dict(color=colors['atmoce'], width=2), 
+    fill='tozeroy', fillcolor='rgba(39, 174, 96, 0.2)',
+    connectgaps=False))  # Don't connect gaps
 power_fig.add_trace(go.Scatter(x=enphase_agg_filtered['Time'], y=enphase_agg_filtered['AC Power (W)'],
-    mode='lines', name='Enphase (Combined)', line=dict(color=colors['enphase'], width=2)))
+    mode='lines+markers', name='Enphase (Combined)', line=dict(color=colors['enphase'], width=2),
+    marker=dict(size=5),
+    connectgaps=False))  # Don't connect gaps - shows actual data points only
 power_fig.update_layout(xaxis_title='Time', yaxis_title='Power (W)', template='plotly_white', height=400, hovermode='x unified')
 st.plotly_chart(power_fig, use_container_width=True)
 
@@ -236,13 +237,15 @@ st.caption("Atmoce PV1, Atmoce PV2, PVleft (IQ8P 6901), PVright (IQ8P 6789)")
 
 dc_power_fig = go.Figure()
 dc_power_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['PV1 Power (W)'],
-    mode='lines', name='Atmoce PV1', line=dict(color=colors['atmoce_pv1'], width=2)))
+    mode='lines', name='Atmoce PV1', line=dict(color=colors['atmoce_pv1'], width=2), connectgaps=False))
 dc_power_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['PV2 Power (W)'],
-    mode='lines', name='Atmoce PV2', line=dict(color=colors['atmoce_pv2'], width=2)))
+    mode='lines', name='Atmoce PV2', line=dict(color=colors['atmoce_pv2'], width=2), connectgaps=False))
 dc_power_fig.add_trace(go.Scatter(x=enphase_left['Time'], y=enphase_left['DC Power (W)'],
-    mode='lines', name='PVleft (6901)', line=dict(color=colors['enphase_left'], width=2)))
+    mode='lines+markers', name='PVleft (6901)', line=dict(color=colors['enphase_left'], width=2), 
+    marker=dict(size=4), connectgaps=False))
 dc_power_fig.add_trace(go.Scatter(x=enphase_right['Time'], y=enphase_right['DC Power (W)'],
-    mode='lines', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2)))
+    mode='lines+markers', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2),
+    marker=dict(size=4), connectgaps=False))
 dc_power_fig.update_layout(xaxis_title='Time', yaxis_title='DC Power (W)', template='plotly_white', height=400, hovermode='x unified')
 st.plotly_chart(dc_power_fig, use_container_width=True)
 
@@ -253,13 +256,15 @@ with col1:
     st.subheader("DC Voltage Comparison")
     dc_voltage_fig = go.Figure()
     dc_voltage_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['PV1 Voltage (V)'],
-        mode='lines', name='Atmoce PV1', line=dict(color=colors['atmoce_pv1'], width=2)))
+        mode='lines', name='Atmoce PV1', line=dict(color=colors['atmoce_pv1'], width=2), connectgaps=False))
     dc_voltage_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['PV2 Voltage (V)'],
-        mode='lines', name='Atmoce PV2', line=dict(color=colors['atmoce_pv2'], width=2)))
+        mode='lines', name='Atmoce PV2', line=dict(color=colors['atmoce_pv2'], width=2), connectgaps=False))
     dc_voltage_fig.add_trace(go.Scatter(x=enphase_left['Time'], y=enphase_left['DC Voltage (V)'],
-        mode='lines', name='PVleft (6901)', line=dict(color=colors['enphase_left'], width=2)))
+        mode='lines+markers', name='PVleft (6901)', line=dict(color=colors['enphase_left'], width=2),
+        marker=dict(size=4), connectgaps=False))
     dc_voltage_fig.add_trace(go.Scatter(x=enphase_right['Time'], y=enphase_right['DC Voltage (V)'],
-        mode='lines', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2)))
+        mode='lines+markers', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2),
+        marker=dict(size=4), connectgaps=False))
     dc_voltage_fig.update_layout(xaxis_title='Time', yaxis_title='Voltage (V)', template='plotly_white', height=350, hovermode='x unified')
     st.plotly_chart(dc_voltage_fig, use_container_width=True)
 
@@ -268,13 +273,15 @@ with col2:
     st.caption("Atmoce: I = P/V (calculated)")
     dc_current_fig = go.Figure()
     dc_current_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['PV1 Current (A)'],
-        mode='lines', name='Atmoce PV1', line=dict(color=colors['atmoce_pv1'], width=2)))
+        mode='lines', name='Atmoce PV1', line=dict(color=colors['atmoce_pv1'], width=2), connectgaps=False))
     dc_current_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['PV2 Current (A)'],
-        mode='lines', name='Atmoce PV2', line=dict(color=colors['atmoce_pv2'], width=2)))
+        mode='lines', name='Atmoce PV2', line=dict(color=colors['atmoce_pv2'], width=2), connectgaps=False))
     dc_current_fig.add_trace(go.Scatter(x=enphase_left['Time'], y=enphase_left['DC Current (A)'],
-        mode='lines', name='PVleft (6901)', line=dict(color=colors['enphase_left'], width=2)))
+        mode='lines+markers', name='PVleft (6901)', line=dict(color=colors['enphase_left'], width=2),
+        marker=dict(size=4), connectgaps=False))
     dc_current_fig.add_trace(go.Scatter(x=enphase_right['Time'], y=enphase_right['DC Current (A)'],
-        mode='lines', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2)))
+        mode='lines+markers', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2),
+        marker=dict(size=4), connectgaps=False))
     dc_current_fig.update_layout(xaxis_title='Time', yaxis_title='Current (A)', template='plotly_white', height=350, hovermode='x unified')
     st.plotly_chart(dc_current_fig, use_container_width=True)
 
@@ -285,10 +292,11 @@ with col1:
     st.subheader("Grid Voltage Over Time")
     grid_voltage_fig = go.Figure()
     grid_voltage_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['Grid Voltage (V)'],
-        mode='lines', name='Atmoce', line=dict(color=colors['atmoce'], width=2)))
+        mode='lines', name='Atmoce', line=dict(color=colors['atmoce'], width=2), connectgaps=False))
     grid_voltage_fig.add_trace(go.Scatter(x=enphase_agg_filtered['Time'], y=enphase_agg_filtered['Grid Voltage (V)'],
-        mode='lines', name='Enphase', line=dict(color=colors['enphase'], width=2)))
-    grid_voltage_fig.add_hline(y=230, line_dash="dash", line_color="green", annotation_text="Nominal 230V")
+        mode='lines+markers', name='Enphase', line=dict(color=colors['enphase'], width=2),
+        marker=dict(size=4), connectgaps=False))
+    grid_voltage_fig.add_hline(y=230, line_dash="dash", line_color="gray", annotation_text="Nominal 230V")
     grid_voltage_fig.update_layout(xaxis_title='Time', yaxis_title='Voltage (V)', template='plotly_white', height=350, hovermode='x unified')
     st.plotly_chart(grid_voltage_fig, use_container_width=True)
 
@@ -296,10 +304,11 @@ with col2:
     st.subheader("Grid Frequency Over Time")
     grid_freq_fig = go.Figure()
     grid_freq_fig.add_trace(go.Scatter(x=atmoce_filtered['Time'], y=atmoce_filtered['Frequency (Hz)'],
-        mode='lines', name='Atmoce', line=dict(color=colors['atmoce'], width=2)))
+        mode='lines', name='Atmoce', line=dict(color=colors['atmoce'], width=2), connectgaps=False))
     grid_freq_fig.add_trace(go.Scatter(x=enphase_agg_filtered['Time'], y=enphase_agg_filtered['Frequency (Hz)'],
-        mode='lines', name='Enphase', line=dict(color=colors['enphase'], width=2)))
-    grid_freq_fig.add_hline(y=50, line_dash="dash", line_color="green", annotation_text="Nominal 50Hz")
+        mode='lines+markers', name='Enphase', line=dict(color=colors['enphase'], width=2),
+        marker=dict(size=4), connectgaps=False))
+    grid_freq_fig.add_hline(y=50, line_dash="dash", line_color="gray", annotation_text="Nominal 50Hz")
     grid_freq_fig.update_layout(xaxis_title='Time', yaxis_title='Frequency (Hz)', template='plotly_white', height=350, hovermode='x unified')
     st.plotly_chart(grid_freq_fig, use_container_width=True)
 
