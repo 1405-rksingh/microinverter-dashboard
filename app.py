@@ -35,7 +35,6 @@ colors = {
     'enphase_right': '#f39c12',    # Yellow-orange
 }
 
-@st.cache_data
 def load_atmoce_data():
     """Load and clean Atmoce Excel files"""
     all_data = []
@@ -63,7 +62,6 @@ def load_atmoce_data():
         return combined_df
     return pd.DataFrame()
 
-@st.cache_data
 def load_enphase_data():
     """Load and clean Enphase CSV files"""
     all_data = []
@@ -93,7 +91,6 @@ def load_enphase_data():
         return combined_df
     return pd.DataFrame()
 
-@st.cache_data
 def round_to_15min(df, value_columns, serial_col='Serial Number'):
     """Round Enphase timestamps to nearest 15-minute intervals (no interpolation)"""
     df = df.copy()
