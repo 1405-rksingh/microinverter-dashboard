@@ -212,6 +212,8 @@ daily_fig.add_trace(go.Bar(x=[str(d) for d in enphase_daily['Date']], y=enphase_
 daily_fig.update_layout(xaxis_title='Date', yaxis_title='Energy (kWh)', barmode='group', template='plotly_white', height=400)
 st.plotly_chart(daily_fig, use_container_width=True)
 
+st.info("📌 **Shadow Experiment:** We conducted a shadow experiment from September 18-21, 2026, where we covered one PV module from each company to analyze their performance under partial shading conditions.")
+
 # Power Generation Over Time
 st.subheader("Power Generation Over Time (AC Power)")
 st.caption("Atmoce: Generated Power | Enphase: (PCU AC Current × AC Voltage) Combined")
