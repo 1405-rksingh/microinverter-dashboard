@@ -71,7 +71,8 @@ def load_enphase_data():
         if file.endswith('.csv'):
             filepath = os.path.join(data_dir, file)
             df = pd.read_csv(filepath)
-            serial = file.replace('_readings.csv', '')
+            # Extract serial number (first 12 digits from filename)
+            serial = file.split('_')[0]
             df['Serial Number'] = serial
             all_data.append(df)
     
@@ -79,7 +80,9 @@ def load_enphase_data():
         combined_df = pd.concat(all_data, ignore_index=True)
         combined_df['Time'] = pd.to_datetime(combined_df['date'], errors='coerce')
         combined_df['Time'] = combined_df['Time'].dt.tz_localize(None)
+        # Deduplicate: keep last occurrence for same serial + timestamp
         combined_df = combined_df.sort_values('Time').dropna(subset=['Time'])
+        combined_df = combined_df.drop_duplicates(subset=['Serial Number', 'Time'], keep='last')
         combined_df['Date'] = combined_df['Time'].dt.date
         combined_df = combined_df.rename(columns={
             'ac_voltage': 'Grid Voltage (V)', 'ac_frequency': 'Frequency (Hz)',
