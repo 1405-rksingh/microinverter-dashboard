@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -212,10 +212,37 @@ daily_fig.add_trace(go.Bar(x=[str(d) for d in atmoce_daily['Date']], y=atmoce_da
     name='Atmoce', marker_color=colors['atmoce'], text=[f"{v:.2f}" for v in atmoce_daily['Daily Produced (kWh)']], textposition='outside'))
 daily_fig.add_trace(go.Bar(x=[str(d) for d in enphase_daily['Date']], y=enphase_daily['Energy (kWh)'],
     name='Enphase', marker_color=colors['enphase'], text=[f"{v:.2f}" for v in enphase_daily['Energy (kWh)']], textposition='outside'))
-daily_fig.update_layout(xaxis_title='Date', yaxis_title='Energy (kWh)', barmode='group', template='plotly_white', height=400)
+# Show ~30 days at a time with a range slider for scrolling
+all_dates = sorted(set(list(atmoce_daily['Date']) + list(enphase_daily['Date'])))
+if len(all_dates) > 30:
+    range_start = str(all_dates[-30])
+    range_end = str(all_dates[-1])
+else:
+    range_start = str(all_dates[0]) if all_dates else None
+    range_end = str(all_dates[-1]) if all_dates else None
+
+daily_fig.update_layout(
+    xaxis_title='Date', yaxis_title='Energy (kWh)', barmode='group',
+    template='plotly_white', height=400,
+    xaxis=dict(
+        range=[range_start, range_end],
+        rangeslider=dict(visible=True, thickness=0.08),
+    )
+)
 st.plotly_chart(daily_fig, use_container_width=True)
 
 st.info("📌 **Shadow Experiment:** We conducted a shadow experiment from September 18-21, 2026, where we covered one PV module from each company to analyze their performance under partial shading conditions.")
+
+# Compute 30-day scrollable window for time-series charts
+_ts_end = end_date
+_ts_start_30d = _ts_end - timedelta(days=30)
+if _ts_start_30d < start_date:
+    _ts_start_30d = start_date
+
+_scroll_xaxis = dict(
+    range=[str(_ts_start_30d), str(_ts_end + timedelta(days=1))],
+    rangeslider=dict(visible=True, thickness=0.08),
+)
 
 # Power Generation Over Time
 st.subheader("Power Generation Over Time (AC Power)")
@@ -230,7 +257,7 @@ power_fig.add_trace(go.Scatter(x=enphase_agg_filtered['Time'], y=enphase_agg_fil
     mode='lines+markers', name='Enphase (Combined)', line=dict(color=colors['enphase'], width=2),
     marker=dict(size=5),
     connectgaps=False))  # Don't connect gaps - shows actual data points only
-power_fig.update_layout(xaxis_title='Time', yaxis_title='Power (W)', template='plotly_white', height=400, hovermode='x unified')
+power_fig.update_layout(xaxis_title='Time', yaxis_title='Power (W)', template='plotly_white', height=400, hovermode='x unified', xaxis=_scroll_xaxis)
 st.plotly_chart(power_fig, use_container_width=True)
 
 # DC Power Comparison
@@ -248,7 +275,7 @@ dc_power_fig.add_trace(go.Scatter(x=enphase_left['Time'], y=enphase_left['DC Pow
 dc_power_fig.add_trace(go.Scatter(x=enphase_right['Time'], y=enphase_right['DC Power (W)'],
     mode='lines+markers', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2),
     marker=dict(size=4), connectgaps=False))
-dc_power_fig.update_layout(xaxis_title='Time', yaxis_title='DC Power (W)', template='plotly_white', height=400, hovermode='x unified')
+dc_power_fig.update_layout(xaxis_title='Time', yaxis_title='DC Power (W)', template='plotly_white', height=400, hovermode='x unified', xaxis=_scroll_xaxis)
 st.plotly_chart(dc_power_fig, use_container_width=True)
 
 # DC Voltage and Current side by side
@@ -267,7 +294,7 @@ with col1:
     dc_voltage_fig.add_trace(go.Scatter(x=enphase_right['Time'], y=enphase_right['DC Voltage (V)'],
         mode='lines+markers', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2),
         marker=dict(size=4), connectgaps=False))
-    dc_voltage_fig.update_layout(xaxis_title='Time', yaxis_title='Voltage (V)', template='plotly_white', height=350, hovermode='x unified')
+    dc_voltage_fig.update_layout(xaxis_title='Time', yaxis_title='Voltage (V)', template='plotly_white', height=350, hovermode='x unified', xaxis=_scroll_xaxis)
     st.plotly_chart(dc_voltage_fig, use_container_width=True)
 
 with col2:
@@ -284,7 +311,7 @@ with col2:
     dc_current_fig.add_trace(go.Scatter(x=enphase_right['Time'], y=enphase_right['DC Current (A)'],
         mode='lines+markers', name='PVright (6789)', line=dict(color=colors['enphase_right'], width=2),
         marker=dict(size=4), connectgaps=False))
-    dc_current_fig.update_layout(xaxis_title='Time', yaxis_title='Current (A)', template='plotly_white', height=350, hovermode='x unified')
+    dc_current_fig.update_layout(xaxis_title='Time', yaxis_title='Current (A)', template='plotly_white', height=350, hovermode='x unified', xaxis=_scroll_xaxis)
     st.plotly_chart(dc_current_fig, use_container_width=True)
 
 # Grid Voltage and Frequency side by side
@@ -299,7 +326,7 @@ with col1:
         mode='lines+markers', name='Enphase', line=dict(color=colors['enphase'], width=2),
         marker=dict(size=4), connectgaps=False))
     grid_voltage_fig.add_hline(y=230, line_dash="dash", line_color="gray", annotation_text="Nominal 230V")
-    grid_voltage_fig.update_layout(xaxis_title='Time', yaxis_title='Voltage (V)', template='plotly_white', height=350, hovermode='x unified')
+    grid_voltage_fig.update_layout(xaxis_title='Time', yaxis_title='Voltage (V)', template='plotly_white', height=350, hovermode='x unified', xaxis=_scroll_xaxis)
     st.plotly_chart(grid_voltage_fig, use_container_width=True)
 
 with col2:
@@ -311,7 +338,7 @@ with col2:
         mode='lines+markers', name='Enphase', line=dict(color=colors['enphase'], width=2),
         marker=dict(size=4), connectgaps=False))
     grid_freq_fig.add_hline(y=50, line_dash="dash", line_color="gray", annotation_text="Nominal 50Hz")
-    grid_freq_fig.update_layout(xaxis_title='Time', yaxis_title='Frequency (Hz)', template='plotly_white', height=350, hovermode='x unified')
+    grid_freq_fig.update_layout(xaxis_title='Time', yaxis_title='Frequency (Hz)', template='plotly_white', height=350, hovermode='x unified', xaxis=_scroll_xaxis)
     st.plotly_chart(grid_freq_fig, use_container_width=True)
 
 # Footer
